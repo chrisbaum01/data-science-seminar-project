@@ -2,101 +2,76 @@ import pandas as pd
 import numpy as np
 from gurobipy import Model, GRB, quicksum
 
-# ===============================
-# 1. Load data
-# ===============================
+print("Starting ETF Portfolio Optimizer...\n")
 
-# Price history (e.g. 5 years)
-prices = pd.read_csv("prices.csv", index_col=0, parse_dates=True)
+# Load price data
+prices = pd.read_csv("genericTestData/prices.csv", index_col=0, parse_dates=True)
 prices = prices.sort_index()
 
-# ETF list
 etfs = prices.columns.tolist()
 N = len(etfs)
+print(f"Loaded {N} ETFs with {len(prices)} price observations")
 
-# Returns (daily log returns)
+# Compute returns and risk metrics
 returns = np.log(prices / prices.shift(1)).dropna()
-
-# Expected returns (mean daily return -> annualized)
-mu = returns.mean().values * 252   # vector length N
-
-# Covariance matrix (annualized)
-Sigma = returns.cov().values * 252  # NxN
-
-# Correlation matrix
+mu = returns.mean().values * 252
+Sigma = returns.cov().values * 252
 R = returns.corr().values
-
-# Off-diagonal correlation matrix C_off = R - I
 C_off = R - np.eye(N)
 
-# ===============================
-# 2. Load holdings structure (country exposures + TER)
-# ===============================
+#Computed annualized returns and covariance matrix
+print("\nAnnualized Expected Returns:")
+for i in range(N):
+    print(f"  {etfs[i]:15s}: {mu[i]:.4f} ({mu[i]*100:5.2f}%)")
 
-hold = pd.read_csv("holdings.csv")
+print("\nAnnualized Covariance Matrix:")
+for i in range(N):
+    row = "  ".join(f"{Sigma[i, j]:.6f}" for j in range(N))
+    print(f"  {row}")
 
-# unique countries
+
+
+# Load holdings structure
+hold = pd.read_csv("genericTestData/holdings.csv")
+
 countries = hold["Country"].unique().tolist()
 C = len(countries)
+print(f"Loaded {C} countries")
 
-# exposure matrix A (C x N)
 A = np.zeros((C, N))
-
-# TER vector
 TER = np.zeros(N)
 
-# Fill A and TER
 for i, etf in enumerate(etfs):
     df = hold[hold["ETF"] == etf]
-    TER[i] = df["TER"].iloc[0]  # assume same TER for all rows of that ETF
+    TER[i] = df["TER"].iloc[0]
     
     for j, country in enumerate(countries):
         weight = df[df["Country"] == country]["Weight"].sum()
         A[j, i] = weight
 
-# ===============================
-# 3. Optimization parameters
-# ===============================
+# Optimization parameters
+alpha = 0.5  # variance penalty
+beta = 0.5   # correlation penalty
+gamma = 3.0  # return reward
+delta = 0.7  # TER penalty
+lam = 0.1    # L2 concentration penalty
 
-# Hyperparameters
-alpha = 1.0     # variance penalty
-beta = 0.3      # correlation penalty
-gamma = 0.5     # return reward
-delta = 1.0     # TER penalty
-lam = 0.1       # L2 concentration penalty
-
-# Country bounds (example: min 0%, max 40% per country)
 E_min = np.zeros(C)
 E_max = np.ones(C) * 0.40
-
-# Maximum ETF weight (e.g. 30%)
 w_max = np.ones(N) * 0.30
 
-# ===============================
-# 4. Build optimization model
-# ===============================
-
+# Build optimization model
+print("\nBuilding optimization model...")
 m = Model("ETF_Portfolio_Optimizer")
 
-# Decision variables: w_i
 w = m.addVars(N, lb=0.0, ub=w_max.tolist(), name="w")
 
-# Portfolio variance term: w^T Σ w
 var_term = quicksum(w[i] * w[j] * Sigma[i, j] for i in range(N) for j in range(N))
-
-# Correlation penalty: w^T C_off w
 corr_term = quicksum(w[i] * w[j] * C_off[i, j] for i in range(N) for j in range(N))
-
-# Return reward: μ^T w
 ret_term = quicksum(mu[i] * w[i] for i in range(N))
-
-# TER penalty: TER^T w
 ter_term = quicksum(TER[i] * w[i] for i in range(N))
-
-# L2 penalty: sum w_i^2
 l2_term = quicksum(w[i] * w[i] for i in range(N))
 
-# Objective function
 m.setObjective(
     alpha * var_term +
     beta * corr_term -
@@ -106,37 +81,48 @@ m.setObjective(
     GRB.MINIMIZE
 )
 
-# ===============================
-# 5. Constraints
-# ===============================
-
-# Full investment
+# Add constraints
 m.addConstr(quicksum(w[i] for i in range(N)) == 1, "budget")
 
-# Country exposure constraints
 for c in range(C):
     exposure = quicksum(A[c, i] * w[i] for i in range(N))
     m.addConstr(exposure >= E_min[c], f"country_min_{countries[c]}")
     m.addConstr(exposure <= E_max[c], f"country_max_{countries[c]}")
+    
+    # testing specific country constraints
+   # if countries[c] == "Germany":
+    #    m.addConstr(exposure >= 0.15, f"country_min_Germany_15pct")
+    
 
-# ===============================
-# 6. Solve
-# ===============================
-
+# Solve
+print("Solving...")
 m.optimize()
 
-# ===============================
-# 7. Print results
-# ===============================
-
+# Print results
 if m.status == GRB.OPTIMAL:
-    print("\nOptimal Portfolio Weights:")
+    print("\n" + "="*60)
+    print("OPTIMAL SOLUTION FOUND")
+    print("="*60)
+    
+    print("\nPortfolio Weights:")
     for i in range(N):
-        print(f"{etfs[i]:10s}: {w[i].X:.4f}")
+        print(f"  {etfs[i]:15s}: {w[i].X:7.4f} ({w[i].X*100:5.2f}%)")
 
     print("\nCountry Exposures:")
     for c in range(C):
         exposure_val = sum(A[c, i] * w[i].X for i in range(N))
-        print(f"{countries[c]:10s}: {exposure_val:.4f}")
+        print(f"  {countries[c]:15s}: {exposure_val:7.4f} ({exposure_val*100:5.2f}%)")
 
-    print("\nObjective value:", m.objVal)
+    # Portfolio statistics
+    var_val = sum(w[i].X * w[j].X * Sigma[i, j] for i in range(N) for j in range(N))
+    ret_val = sum(mu[i] * w[i].X for i in range(N))
+    ter_val = sum(TER[i] * w[i].X for i in range(N))
+    
+    print("\nPortfolio Statistics:")
+    print(f"  Expected return:    {ret_val:.4f} ({ret_val*100:.2f}%)")
+    print(f"  Volatility:         {np.sqrt(var_val):.4f} ({np.sqrt(var_val)*100:.2f}%)")
+    print(f"  Sharpe ratio:       {ret_val / np.sqrt(var_val):.4f}")
+    print(f"  Weighted avg TER:   {ter_val:.4f} ({ter_val*100:.2f}%)")
+    print(f"  Objective value:    {m.objVal:.6f}")
+else:
+    print(f"\nOptimization failed with status: {m.status}")
