@@ -63,9 +63,9 @@ returns = pd.DataFrame(returns, index=dates, columns=etfs)
 # ===============================
 
 prices = 100 * np.exp(returns.cumsum())
-prices.to_csv("genericTestData/prices.csv")
+prices.to_csv("prices.csv")
 
-print("✔ genericTestData/prices.csv generated")
+print("✔ prices.csv generated")
 
 # ===============================
 # Holdings / country exposure
@@ -107,6 +107,6 @@ holdings_df = pd.DataFrame(
     holdings, columns=["ETF", "Country", "Weight", "TER"]
 )
 
-holdings_df.to_csv("genericTestData/holdings.csv", index=False)
+holdings_df.to_csv("holdings.csv", index=False)
 
-print("✔ genericTestData/holdings.csv generated")
+print("✔ holdings.csv generated")
