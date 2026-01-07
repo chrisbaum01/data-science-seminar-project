@@ -179,5 +179,123 @@ if m.status == GRB.OPTIMAL:
     print(f"  Sharpe ratio:       {ret_val / np.sqrt(var_val):.4f}")
     print(f"  Weighted avg TER:   {ter_val:.4f} ({ter_val*100:.2f}%)")
     print(f"  Objective value:    {m.objVal:.6f}")
+
+
+    # add visualization of the portfolio weights
+    try:
+        import matplotlib
+        matplotlib.use('TkAgg')  # Use TkAgg backend for displaying plots
+        import matplotlib.pyplot as plt
+
+        labels = [etfs[i] for i in range(N) if w[i].X > 1e-6]
+        sizes = [w[i].X for i in range(N) if w[i].X > 1e-6]
+        
+        # Create explode effect for top holdings
+        explode = [0.05 if size == max(sizes) else 0 for size in sizes]
+        
+        # Use a nice color palette
+        colors = plt.cm.Dark2(range(len(sizes)))
+
+        plt.figure(figsize=(12, 8))
+        wedges, texts, autotexts = plt.pie(sizes, labels=labels, autopct='%1.1f%%', 
+                                            startangle=140, colors=colors, explode=explode,
+                                            textprops={'fontsize': 10, 'weight': 'bold'})
+        
+        # Make percentage text more readable
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontsize(11)
+        
+        plt.axis('equal')
+        plt.title('ETF Portfolio Weights', fontsize=16, weight='bold', pad=20)
+        plt.tight_layout()
+        plt.show(block=True)
+    except ImportError:
+        print("matplotlib not installed, skipping portfolio weights visualization.")
+    # add visualization of country exposures
+    try:
+        import matplotlib
+        matplotlib.use('TkAgg')
+        import matplotlib.pyplot as plt
+
+        country_labels = countries
+        country_sizes = [sum(A[c, i] * w[i].X for i in range(N)) for c in range(C)]
+        
+        # Filter out very small exposures for cleaner display
+        threshold = 0.01
+        filtered_data = [(label, size) for label, size in zip(country_labels, country_sizes) if size > threshold]
+        if filtered_data:
+            country_labels_filtered, country_sizes_filtered = zip(*filtered_data)
+        else:
+            country_labels_filtered, country_sizes_filtered = country_labels, country_sizes
+        
+        # Create explode effect for top exposures
+        explode = [0.05 if size == max(country_sizes_filtered) else 0 for size in country_sizes_filtered]
+        
+        # Use a nice color palette
+        colors = plt.cm.Dark2(range(len(country_sizes_filtered)))
+
+        plt.figure(figsize=(12, 8))
+        wedges, texts, autotexts = plt.pie(country_sizes_filtered, labels=country_labels_filtered, 
+                                            autopct='%1.1f%%', startangle=140, colors=colors,
+                                            explode=explode, 
+                                            textprops={'fontsize': 10, 'weight': 'bold'})
+        
+        # Make percentage text more readable
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontsize(11)
+        
+        plt.axis('equal')
+        plt.title('Country Exposures in ETF Portfolio', fontsize=16, weight='bold', pad=20)
+        plt.tight_layout()
+        plt.show(block=True)
+    except ImportError:
+        print("matplotlib not installed, skipping country exposures visualization.")
+    # add visualization of industry exposures
+    try:
+        import matplotlib
+        matplotlib.use('TkAgg')
+        import matplotlib.pyplot as plt
+
+        industry_labels = industries
+        industry_sizes = [sum(B[ind, i] * w[i].X for i in range(N)) for ind in range(I)]
+        
+        # Filter out very small exposures for cleaner display
+        threshold = 0.01
+        filtered_data = [(label, size) for label, size in zip(industry_labels, industry_sizes) if size > threshold]
+        if filtered_data:
+            industry_labels_filtered, industry_sizes_filtered = zip(*filtered_data)
+        else:
+            industry_labels_filtered, industry_sizes_filtered = industry_labels, industry_sizes
+        
+        # Create explode effect for top exposures
+        explode = [0.05 if size == max(industry_sizes_filtered) else 0 for size in industry_sizes_filtered]
+        
+        # Use a nice color palette
+        colors = plt.cm.Dark2(range(len(industry_sizes_filtered)))
+
+        plt.figure(figsize=(12, 8))
+        wedges, texts, autotexts = plt.pie(industry_sizes_filtered, labels=industry_labels_filtered, 
+                                            autopct='%1.1f%%', startangle=140, colors=colors,
+                                            explode=explode, 
+                                            textprops={'fontsize': 10, 'weight': 'bold'})
+        
+        # Make percentage text more readable
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontsize(11)
+        
+        plt.axis('equal')
+        plt.title('Industry Exposures in ETF Portfolio', fontsize=16, weight='bold', pad=20)
+        plt.tight_layout()
+        plt.show(block=True)
+    except ImportError:
+        print("matplotlib not installed, skipping industry exposures visualization.")
+
+    # print plots
+
+
+    
 else:
     print(f"\nOptimization failed with status: {m.status}")
