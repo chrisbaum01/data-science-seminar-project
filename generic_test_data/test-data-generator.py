@@ -107,6 +107,65 @@ holdings_df = pd.DataFrame(
     holdings, columns=["ETF", "Country", "Weight", "TER"]
 )
 
-holdings_df.to_csv("holdings.csv", index=False)
+holdings_df.to_csv("holdings_country.csv", index=False)
 
-print("✔ holdings.csv generated")
+print("✔ holdings_country.csv generated")
+
+
+# add industry holdings
+industries = [
+    "Technology",
+    "Healthcare",
+    "Finance",
+    "Energy",
+    "Consumer Goods",
+    "Utilities"
+]
+industry_holdings = [
+    # ETF_US
+    ("ETF_US", "Technology", 0.30),     
+    ("ETF_US", "Healthcare", 0.20),
+    ("ETF_US", "Finance", 0.25),
+    ("ETF_US", "Energy", 0.15),
+    ("ETF_US", "Consumer Goods", 0.05),
+    ("ETF_US", "Utilities", 0.05),
+    # ETF_EU
+    ("ETF_EU", "Technology", 0.25),
+    ("ETF_EU", "Healthcare", 0.15),
+    ("ETF_EU", "Finance", 0.30),
+    ("ETF_EU", "Energy", 0.10),
+    ("ETF_EU", "Consumer Goods", 0.15),
+    ("ETF_EU", "Utilities", 0.05),
+    # ETF_EM
+    ("ETF_EM", "Technology", 0.20),
+    ("ETF_EM", "Healthcare", 0.10),
+    ("ETF_EM", "Finance", 0.25),
+    ("ETF_EM", "Energy", 0.20),
+    ("ETF_EM", "Consumer Goods", 0.15),
+    ("ETF_EM", "Utilities", 0.10),
+    # ETF_ASIA
+    ("ETF_ASIA", "Technology", 0.35),
+    ("ETF_ASIA", "Healthcare", 0.15),
+    ("ETF_ASIA", "Finance", 0.20),
+    ("ETF_ASIA", "Energy", 0.10),       
+    ("ETF_ASIA", "Consumer Goods", 0.15),
+    ("ETF_ASIA", "Utilities", 0.05),
+    # ETF_BOND
+    ("ETF_BOND", "Technology", 0.05),
+    ("ETF_BOND", "Healthcare", 0.10),
+    ("ETF_BOND", "Finance", 0.15),
+    ("ETF_BOND", "Energy", 0.10),
+    ("ETF_BOND", "Consumer Goods", 0.30),
+    ("ETF_BOND", "Utilities", 0.30),
+    # ETF_COMMOD
+    ("ETF_COMMOD", "Technology", 0.10),
+    ("ETF_COMMOD", "Healthcare", 0.10),
+    ("ETF_COMMOD", "Finance", 0.20),
+    ("ETF_COMMOD", "Energy", 0.30),
+    ("ETF_COMMOD", "Consumer Goods", 0.20),  
+    ("ETF_COMMOD", "Utilities", 0.10),  
+]
+industry_holdings_df = pd.DataFrame(
+    industry_holdings, columns=["ETF", "Industry", "Weight"]
+)
+industry_holdings_df.to_csv("holdings_industry.csv", index=False)   

@@ -5,7 +5,7 @@ from gurobipy import Model, GRB, quicksum
 print("Starting ETF Portfolio Optimizer...\n")
 
 # Load price data
-prices = pd.read_csv("genericTestData/prices.csv", index_col=0, parse_dates=True)
+prices = pd.read_csv("generic_test_data/prices.csv", index_col=0, parse_dates=True)
 prices = prices.sort_index()
 
 etfs = prices.columns.tolist()
@@ -31,10 +31,10 @@ for i in range(N):
 
 
 
-# Load holdings structure
-hold = pd.read_csv("genericTestData/holdings.csv")
+# Load holdings country structure
+hold_country = pd.read_csv("generic_test_data/holdings_country.csv")
 
-countries = hold["Country"].unique().tolist()
+countries = hold_country["Country"].unique().tolist()
 C = len(countries)
 print(f"Loaded {C} countries")
 
@@ -42,23 +42,42 @@ A = np.zeros((C, N))
 TER = np.zeros(N)
 
 for i, etf in enumerate(etfs):
-    df = hold[hold["ETF"] == etf]
+    df = hold_country[hold_country["ETF"] == etf]
     TER[i] = df["TER"].iloc[0]
     
     for j, country in enumerate(countries):
-        weight = df[df["Country"] == country]["Weight"].sum()
-        A[j, i] = weight
+        weight_c = df[df["Country"] == country]["Weight"].sum()
+        A[j, i] = weight_c
+
+# load holdings industry structure
+hold_industry = pd.read_csv("generic_test_data/holdings_industry.csv")
+
+industries = hold_industry["Industry"].unique().tolist()
+I = len(industries)
+print(f"Loaded {I} industries")
+B = np.zeros((I, N))
+for i, etf in enumerate(etfs):
+    df = hold_industry[hold_industry["ETF"] == etf]
+    
+    for j, industry in enumerate(industries):
+        weight_i = df[df["Industry"] == industry]["Weight"].sum()
+        B[j, i] = weight_i
+
 
 # Optimization parameters
-alpha = 0.5  # variance penalty
-beta = 0.5   # correlation penalty
-gamma = 3.0  # return reward
+alpha = 1.0  # variance penalty
+beta = 0.1   # correlation penalty
+gamma = 4.0  # return reward
 delta = 0.7  # TER penalty
 lam = 0.1    # L2 concentration penalty
 
+
+# max exposure for country and industries + weight constraints
 E_min = np.zeros(C)
-E_max = np.ones(C) * 0.40
-w_max = np.ones(N) * 0.30
+E_max = np.ones(C) * 0.30 # max 30% exposure per country
+I_min = np.zeros(I)
+I_max = np.ones(I) * 0.30 # max 30% exposure per industry
+w_max = np.ones(N) * 0.30 # max 30% weight per ETF
 
 # Build optimization model
 print("\nBuilding optimization model...")
@@ -72,6 +91,7 @@ ret_term = quicksum(mu[i] * w[i] for i in range(N))
 ter_term = quicksum(TER[i] * w[i] for i in range(N))
 l2_term = quicksum(w[i] * w[i] for i in range(N))
 
+
 m.setObjective(
     alpha * var_term +
     beta * corr_term -
@@ -82,16 +102,30 @@ m.setObjective(
 )
 
 # Add constraints
+# etf weight sum to 1 constraint
 m.addConstr(quicksum(w[i] for i in range(N)) == 1, "budget")
 
+# individual etf weight constraints
+for i in range(N):
+    m.addConstr(w[i] >= 0.0, f"weight_min_{etfs[i]}")
+    m.addConstr(w[i] <= w_max[i], f"weight_max_{etfs[i]}")
+
+#country exposure constraints
 for c in range(C):
     exposure = quicksum(A[c, i] * w[i] for i in range(N))
     m.addConstr(exposure >= E_min[c], f"country_min_{countries[c]}")
     m.addConstr(exposure <= E_max[c], f"country_max_{countries[c]}")
     
     # testing specific country constraints
-   # if countries[c] == "Germany":
-    #    m.addConstr(exposure >= 0.15, f"country_min_Germany_15pct")
+    if countries[c] == "USA":
+        m.addConstr(exposure <= 0.15, f"country_max_USA_15pct")
+
+
+# add industry exposure constraints 
+for ind in range(I):
+    exposure = quicksum(B[ind, i] * w[i] for i in range(N))
+    m.addConstr(exposure >= I_min[ind], f"industry_min_{industries[ind]}")
+    m.addConstr(exposure <= I_max[ind], f"industry_max_{industries[ind]}")
     
 
 # Solve
@@ -112,6 +146,11 @@ if m.status == GRB.OPTIMAL:
     for c in range(C):
         exposure_val = sum(A[c, i] * w[i].X for i in range(N))
         print(f"  {countries[c]:15s}: {exposure_val:7.4f} ({exposure_val*100:5.2f}%)")
+
+    print("\nIndustry Exposures:")
+    for ind in range(I):
+        exposure_val = sum(B[ind, i] * w[i].X for i in range(N))
+        print(f"  {industries[ind]:15s}: {exposure_val:7.4f} ({exposure_val*100:5.2f}%)")
 
     # Portfolio statistics
     var_val = sum(w[i].X * w[j].X * Sigma[i, j] for i in range(N) for j in range(N))
