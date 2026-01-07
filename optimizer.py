@@ -64,12 +64,13 @@ for i, etf in enumerate(etfs):
         B[j, i] = weight_i
 
 
-# Optimization parameters
+# Optimization parameters - play with these to see effects
 alpha = 1.0  # variance penalty
-beta = 0.1   # correlation penalty
-gamma = 4.0  # return reward
-delta = 0.7  # TER penalty
+beta = 0.5   # correlation penalty
+gamma = 2.5  # return reward
+delta = 0.2  # TER penalty
 lam = 0.1    # L2 concentration penalty
+max_etfs = 10  # maximum number of ETFs in portfolio
 
 
 # max exposure for country and industries + weight constraints
@@ -77,7 +78,7 @@ E_min = np.zeros(C)
 E_max = np.ones(C) * 0.30 # max 30% exposure per country
 I_min = np.zeros(I)
 I_max = np.ones(I) * 0.30 # max 30% exposure per industry
-w_max = np.ones(N) * 0.30 # max 30% weight per ETF
+w_max = np.ones(N) * 0.50 # max 50% weight per ETF
 
 # Build optimization model
 print("\nBuilding optimization model...")
@@ -117,8 +118,8 @@ for c in range(C):
     m.addConstr(exposure <= E_max[c], f"country_max_{countries[c]}")
     
     # testing specific country constraints
-    if countries[c] == "USA":
-        m.addConstr(exposure <= 0.15, f"country_max_USA_15pct")
+   # if countries[c] == "USA":
+    #    m.addConstr(exposure <= 0.15, f"country_max_USA_15pct")
 
 
 # add industry exposure constraints 
@@ -126,6 +127,14 @@ for ind in range(I):
     exposure = quicksum(B[ind, i] * w[i] for i in range(N))
     m.addConstr(exposure >= I_min[ind], f"industry_min_{industries[ind]}")
     m.addConstr(exposure <= I_max[ind], f"industry_max_{industries[ind]}")
+
+# add constraint that we want a max of max_etfs ETFs in the portfolio
+# This requires introducing binary variables and a big-M constraint
+y = m.addVars(N, vtype=GRB.BINARY, name="y")
+M = 1.0  # big-M value (should be >= max possible weight)
+for i in range(N):
+    m.addConstr(w[i] <= M * y[i], f"bigM_{etfs[i]}")
+m.addConstr(quicksum(y[i] for i in range(N)) <= max_etfs, "max_etfs_constraint")
     
 
 # Solve
@@ -138,9 +147,14 @@ if m.status == GRB.OPTIMAL:
     print("OPTIMAL SOLUTION FOUND")
     print("="*60)
     
+    # Count active ETFs
+    active_etfs = sum(1 for i in range(N) if w[i].X > 1e-6)
+    print(f"\nNumber of ETFs in portfolio: {active_etfs} (max allowed: {max_etfs})")
+    
     print("\nPortfolio Weights:")
     for i in range(N):
-        print(f"  {etfs[i]:15s}: {w[i].X:7.4f} ({w[i].X*100:5.2f}%)")
+        if w[i].X > 1e-6:  # Only show non-zero weights
+            print(f"  {etfs[i]:15s}: {w[i].X:7.4f} ({w[i].X*100:5.2f}%)")
 
     print("\nCountry Exposures:")
     for c in range(C):
@@ -156,6 +170,8 @@ if m.status == GRB.OPTIMAL:
     var_val = sum(w[i].X * w[j].X * Sigma[i, j] for i in range(N) for j in range(N))
     ret_val = sum(mu[i] * w[i].X for i in range(N))
     ter_val = sum(TER[i] * w[i].X for i in range(N))
+  
+
     
     print("\nPortfolio Statistics:")
     print(f"  Expected return:    {ret_val:.4f} ({ret_val*100:.2f}%)")
