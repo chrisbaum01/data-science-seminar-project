@@ -3,36 +3,7 @@ from pathlib import Path
 import pandas as pd
 from etf_scraper import ETFScraper
 
-def get_ter(isin):
-    url = f"https://www.justetf.com/en/etf-profile.html?isin={isin}"
 
-    rq = requests.get(url, headers=headers)
-    if  rq.status_code == 403:
-        print(isin)
-    html = rq.text
-    soup = BeautifulSoup(html, "html.parser")
-
-    # 找到包含 TER 的 label
-    labels = soup.find_all(
-        "div",
-        class_="val bold",
-        attrs={"data-testid": "etf-profile-header_ter-value"}
-    )
-    ter = None
-    if len(labels) == 1:
-        label = labels[0]
-        ter = label.get_text(strip=True).split()[0]
-        print("ISIN:",isin,"TER:", ter)
-        pattern = r'(\d+\.\d+)(\s*%)'
-        ter= float(re.match(pattern,ter).group(1))
-        return ({'ISIN':isin,"TER":ter})
-    else:
-        print(f'ISIN:{isin} not found')
-        manual_ter_lst.append(isin)
-        return None
-        
-
-        
 def aggregate_etf_data(df, ticker):
     """
     input: df, Ticker, TER
