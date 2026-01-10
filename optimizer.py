@@ -4,13 +4,28 @@ from gurobipy import Model, GRB, quicksum
 
 print("Starting ETF Portfolio Optimizer...\n")
 
-# Load price data
-prices = pd.read_csv("generic_test_data/prices.csv", index_col=0, parse_dates=True)
+# Load price data (long format with Date, Ticker, value columns)
+prices_long = pd.read_csv("webscrap_and_data/prices.csv")
+# Convert from long format to wide format
+prices = prices_long.pivot(index='Date', columns='Ticker', values='value')
+prices.index = pd.to_datetime(prices.index)
 prices = prices.sort_index()
+
+# Handle missing values: forward fill then drop columns with too many NaNs
+print(f"Loaded {len(prices.columns)} ETFs with {len(prices)} price observations")
+missing_pct = prices.isna().sum() / len(prices) * 100
+print(f"ETFs with >50% missing data: {(missing_pct > 50).sum()}")
+
+# Drop ETFs with more than 50% missing data
+prices = prices.loc[:, missing_pct <= 50]
+# Forward fill remaining missing values (assume price unchanged on missing days)
+prices = prices.fillna(method='ffill')
+# Drop any rows with remaining NaNs (typically at the start)
+prices = prices.dropna(axis=1)
 
 etfs = prices.columns.tolist()
 N = len(etfs)
-print(f"Loaded {N} ETFs with {len(prices)} price observations")
+print(f"After data cleaning: {N} ETFs with {len(prices)} price observations")
 
 # Compute returns and risk metrics
 returns = np.log(prices / prices.shift(1)).dropna()
@@ -30,11 +45,21 @@ for i in range(N):
     print(f"  {row}")
 
 
+# Helper function to strip exchange suffix from ticker
+def strip_exchange_suffix(ticker):
+    """Remove exchange suffix like .DE, .L, .SW, .AS from ticker"""
+    for suffix in ['.DE', '.L', '.SW', '.AS']:
+        if ticker.endswith(suffix):
+            return ticker[:-len(suffix)]
+    return ticker
 
 # Load holdings country structure
-hold_country = pd.read_csv("generic_test_data/holdings_country.csv")
+hold_country = pd.read_csv("webscrap_and_data/master_location_table.csv")
 
-countries = hold_country["Country"].unique().tolist()
+# Filter out EU and empty locations
+hold_country = hold_country[~hold_country["Location"].isin(["Europäische Union", "--"])]
+
+countries = hold_country["Location"].unique().tolist()
 C = len(countries)
 print(f"Loaded {C} countries")
 
@@ -42,34 +67,60 @@ A = np.zeros((C, N))
 TER = np.zeros(N)
 
 for i, etf in enumerate(etfs):
-    df = hold_country[hold_country["ETF"] == etf]
-    TER[i] = df["TER"].iloc[0]
+    # Strip exchange suffix to match with holdings data
+    etf_base = strip_exchange_suffix(etf)
+    df = hold_country[hold_country["Ticker"] == etf_base]
+    if len(df) > 0:
+        TER[i] = df["TER"].iloc[0]
     
     for j, country in enumerate(countries):
-        weight_c = df[df["Country"] == country]["Weight"].sum()
+        weight_c = df[df["Location"] == country]["Weight"].sum()
         A[j, i] = weight_c
 
 # load holdings industry structure
-hold_industry = pd.read_csv("generic_test_data/holdings_industry.csv")
+hold_industry = pd.read_csv("webscrap_and_data/master_industry_table.csv")
 
-industries = hold_industry["Industry"].unique().tolist()
+industries = hold_industry["Sector"].unique().tolist()
 I = len(industries)
 print(f"Loaded {I} industries")
 B = np.zeros((I, N))
 for i, etf in enumerate(etfs):
-    df = hold_industry[hold_industry["ETF"] == etf]
+    # Strip exchange suffix to match with holdings data
+    etf_base = strip_exchange_suffix(etf)
+    df = hold_industry[hold_industry["Ticker"] == etf_base]
     
     for j, industry in enumerate(industries):
-        weight_i = df[df["Industry"] == industry]["Weight"].sum()
+        weight_i = df[df["Sector"] == industry]["Weight"].sum()
         B[j, i] = weight_i
 
 
-# Optimization parameters - play with these to see effects
-alpha = 1.0  # variance penalty
-beta = 0.5   # correlation penalty
-gamma = 2.5  # return reward
-delta = 0.2  # TER penalty
-lam = 0.1    # L2 concentration penalty
+# Optimization parameters
+
+# Low-risk profile
+'''
+alpha = 3.0   # strong variance penalty
+beta  = 2.0   # strong correlation penalty
+gamma = 0.8   # low return reward
+delta = 0.3   # moderate TER penalty
+lam   = 0.5   # strong concentration penalty
+profile_name = "Low-risk profile selected"
+
+# Medium-risk profile
+alpha = 1.0   # balanced variance penalty
+beta  = 1.0   # balanced correlation penalty
+gamma = 1.5   # moderate return reward
+delta = 0.2   # moderate TER penalty
+lam   = 0.2   # moderate concentration penalty
+profile_name = "Medium-risk profile selected"
+'''
+# High-risk profile
+alpha = 0.5   # weak variance penalty
+beta  = 0.3   # weak correlation penalty
+gamma = 4.0   # strong return reward
+delta = 0.1   # low TER penalty
+lam   = 0.05  # weak concentration penalty
+profile_name = "High-risk profile selected"
+
 max_etfs = 10  # maximum number of ETFs in portfolio
 
 
@@ -146,7 +197,8 @@ if m.status == GRB.OPTIMAL:
     print("\n" + "="*60)
     print("OPTIMAL SOLUTION FOUND")
     print("="*60)
-    
+    print(f"  Risk profile:       {profile_name}")
+
     # Count active ETFs
     active_etfs = sum(1 for i in range(N) if w[i].X > 1e-6)
     print(f"\nNumber of ETFs in portfolio: {active_etfs} (max allowed: {max_etfs})")
@@ -174,6 +226,7 @@ if m.status == GRB.OPTIMAL:
 
     
     print("\nPortfolio Statistics:")
+    
     print(f"  Expected return:    {ret_val:.4f} ({ret_val*100:.2f}%)")
     print(f"  Volatility:         {np.sqrt(var_val):.4f} ({np.sqrt(var_val)*100:.2f}%)")
     print(f"  Sharpe ratio:       {ret_val / np.sqrt(var_val):.4f}")
@@ -218,16 +271,23 @@ if m.status == GRB.OPTIMAL:
         matplotlib.use('TkAgg')
         import matplotlib.pyplot as plt
 
-        country_labels = countries
-        country_sizes = [sum(A[c, i] * w[i].X for i in range(N)) for c in range(C)]
+        # Compute exact country exposures (same as printed)
+        country_exposures = [(countries[c], sum(A[c, i] * w[i].X for i in range(N))) for c in range(C)]
         
-        # Filter out very small exposures for cleaner display
+        # Separate large and small exposures
         threshold = 0.01
-        filtered_data = [(label, size) for label, size in zip(country_labels, country_sizes) if size > threshold]
-        if filtered_data:
-            country_labels_filtered, country_sizes_filtered = zip(*filtered_data)
+        large_exposures = [(label, size) for label, size in country_exposures if size > threshold]
+        small_exposures = [(label, size) for label, size in country_exposures if size <= threshold]
+        
+        # Add Rest category if there are small exposures
+        if small_exposures:
+            rest_sum = sum(size for _, size in small_exposures)
+            large_exposures.append(('Rest', rest_sum))
+        
+        if large_exposures:
+            country_labels_filtered, country_sizes_filtered = zip(*large_exposures)
         else:
-            country_labels_filtered, country_sizes_filtered = country_labels, country_sizes
+            country_labels_filtered, country_sizes_filtered = ['No Data'], [1.0]
         
         # Create explode effect for top exposures
         explode = [0.05 if size == max(country_sizes_filtered) else 0 for size in country_sizes_filtered]
@@ -258,16 +318,23 @@ if m.status == GRB.OPTIMAL:
         matplotlib.use('TkAgg')
         import matplotlib.pyplot as plt
 
-        industry_labels = industries
-        industry_sizes = [sum(B[ind, i] * w[i].X for i in range(N)) for ind in range(I)]
+        # Compute exact industry exposures (same as printed)
+        industry_exposures = [(industries[ind], sum(B[ind, i] * w[i].X for i in range(N))) for ind in range(I)]
         
-        # Filter out very small exposures for cleaner display
+        # Separate large and small exposures
         threshold = 0.01
-        filtered_data = [(label, size) for label, size in zip(industry_labels, industry_sizes) if size > threshold]
-        if filtered_data:
-            industry_labels_filtered, industry_sizes_filtered = zip(*filtered_data)
+        large_exposures = [(label, size) for label, size in industry_exposures if size > threshold]
+        small_exposures = [(label, size) for label, size in industry_exposures if size <= threshold]
+        
+        # Add Rest category if there are small exposures
+        if small_exposures:
+            rest_sum = sum(size for _, size in small_exposures)
+            large_exposures.append(('Rest', rest_sum))
+        
+        if large_exposures:
+            industry_labels_filtered, industry_sizes_filtered = zip(*large_exposures)
         else:
-            industry_labels_filtered, industry_sizes_filtered = industry_labels, industry_sizes
+            industry_labels_filtered, industry_sizes_filtered = ['No Data'], [1.0]
         
         # Create explode effect for top exposures
         explode = [0.05 if size == max(industry_sizes_filtered) else 0 for size in industry_sizes_filtered]
