@@ -5,7 +5,7 @@ from gurobipy import Model, GRB, quicksum
 print("Starting ETF Portfolio Optimizer...\n")
 
 # Load price data (long format with Date, Ticker, value columns)
-prices_long = pd.read_csv("webscrap_and_data/prices.csv")
+prices_long = pd.read_csv("webscrap_and_data/prices_6y.csv")
 # Convert from long format to wide format
 prices = prices_long.pivot(index='Date', columns='Ticker', values='value')
 prices.index = pd.to_datetime(prices.index)
@@ -35,15 +35,23 @@ R = returns.corr().values
 C_off = R - np.eye(N)
 
 #Computed annualized returns and covariance matrix
-print("\nAnnualized Expected Returns:")
-for i in range(N):
-    print(f"  {etfs[i]:15s}: {mu[i]:.4f} ({mu[i]*100:5.2f}%)")
+# only print mu and variance for EUNL.DE
 
+if 'EUNL.DE' in etfs:
+    idx = etfs.index('EUNL.DE')
+    print("\nAnnualized Expected Returns:")
+    print(f"  {'EUNL.DE':15s}: {mu[idx]:.4f} ({mu[idx]*100:5.2f}%)")
+    variance = Sigma[idx, idx]
+    print(f"\nVariance of EUNL.DE: {variance:.6f} ({np.sqrt(variance)*100:.2f}% volatility)")
+else:
+    print("\nEUNL.DE not found in ETF list")
+
+'''
 print("\nAnnualized Covariance Matrix:")
 for i in range(N):
     row = "  ".join(f"{Sigma[i, j]:.6f}" for j in range(N))
     print(f"  {row}")
-
+'''
 
 # Helper function to strip exchange suffix from ticker
 def strip_exchange_suffix(ticker):
@@ -98,8 +106,8 @@ for i, etf in enumerate(etfs):
 
 # Low-risk profile
 '''
-alpha = 3.0   # strong variance penalty
-beta  = 2.0   # strong correlation penalty
+alpha = 2.0   # strong variance penalty
+beta  = 4.0   # strong correlation penalty
 gamma = 0.8   # low return reward
 delta = 0.3   # moderate TER penalty
 lam   = 0.5   # strong concentration penalty
@@ -107,15 +115,15 @@ profile_name = "Low-risk profile selected"
 
 # Medium-risk profile
 alpha = 1.0   # balanced variance penalty
-beta  = 1.0   # balanced correlation penalty
-gamma = 1.5   # moderate return reward
+beta  = 2.5   # balanced correlation penalty
+gamma = 2.0   # moderate return reward
 delta = 0.2   # moderate TER penalty
 lam   = 0.2   # moderate concentration penalty
 profile_name = "Medium-risk profile selected"
 '''
 # High-risk profile
 alpha = 0.5   # weak variance penalty
-beta  = 0.3   # weak correlation penalty
+beta  = 1.0   # weak correlation penalty
 gamma = 4.0   # strong return reward
 delta = 0.1   # low TER penalty
 lam   = 0.05  # weak concentration penalty
@@ -209,9 +217,11 @@ if m.status == GRB.OPTIMAL:
             print(f"  {etfs[i]:15s}: {w[i].X:7.4f} ({w[i].X*100:5.2f}%)")
 
     print("\nCountry Exposures:")
-    for c in range(C):
-        exposure_val = sum(A[c, i] * w[i].X for i in range(N))
-        print(f"  {countries[c]:15s}: {exposure_val:7.4f} ({exposure_val*100:5.2f}%)")
+    # only top 10 countries by exposure
+    country_exposures = [(countries[c], sum(A[c, i] * w[i].X for i in range(N))) for c in range(C)]
+    country_exposures_sorted = sorted(country_exposures, key=lambda x: x[1], reverse=True)[:10]
+    for country, exposure_val in country_exposures_sorted:
+        print(f"  {country:15s}: {exposure_val:7.4f} ({exposure_val*100:5.2f}%)")
 
     print("\nIndustry Exposures:")
     for ind in range(I):
@@ -233,7 +243,7 @@ if m.status == GRB.OPTIMAL:
     print(f"  Weighted avg TER:   {ter_val:.4f} ({ter_val*100:.2f}%)")
     print(f"  Objective value:    {m.objVal:.6f}")
 
-
+'''
     # add visualization of the portfolio weights
     try:
         import matplotlib
@@ -366,3 +376,4 @@ if m.status == GRB.OPTIMAL:
     
 else:
     print(f"\nOptimization failed with status: {m.status}")
+'''
