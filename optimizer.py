@@ -4,14 +4,14 @@ from gurobipy import Model, GRB, quicksum
 
 print("Starting ETF Portfolio Optimizer...\n")
 
-# Load price data (long format with Date, Ticker, value columns)
+
 prices_long = pd.read_csv("webscrap_and_data/prices_6y.csv")
-# Convert from long format to wide format
+
 prices = prices_long.pivot(index='Date', columns='Ticker', values='value')
 prices.index = pd.to_datetime(prices.index)
 prices = prices.sort_index()
 
-# Handle missing values: forward fill then drop columns with too many NaNs
+
 print(f"Loaded {len(prices.columns)} ETFs with {len(prices)} price observations")
 missing_pct = prices.isna().sum() / len(prices) * 100
 print(f"ETFs with >50% missing data: {(missing_pct > 50).sum()}")
@@ -20,7 +20,6 @@ print(f"ETFs with >50% missing data: {(missing_pct > 50).sum()}")
 prices = prices.loc[:, missing_pct <= 50]
 # Forward fill remaining missing values (assume price unchanged on missing days)
 prices = prices.fillna(method='ffill')
-# Drop any rows with remaining NaNs (typically at the start)
 prices = prices.dropna(axis=1)
 
 etfs = prices.columns.tolist()
@@ -34,8 +33,7 @@ Sigma = returns.cov().values * 252
 R = returns.corr().values
 C_off = R - np.eye(N)
 
-#Computed annualized returns and covariance matrix
-# only print mu and variance for EUNL.DE
+#Computed annualized returns and covariance matrix - only print mu and variance for EUNL.DE
 
 if 'EUNL.DE' in etfs:
     idx = etfs.index('EUNL.DE')
@@ -46,14 +44,7 @@ if 'EUNL.DE' in etfs:
 else:
     print("\nEUNL.DE not found in ETF list")
 
-'''
-print("\nAnnualized Covariance Matrix:")
-for i in range(N):
-    row = "  ".join(f"{Sigma[i, j]:.6f}" for j in range(N))
-    print(f"  {row}")
-'''
 
-# Helper function to strip exchange suffix from ticker
 def strip_exchange_suffix(ticker):
     """Remove exchange suffix like .DE, .L, .SW, .AS from ticker"""
     for suffix in ['.DE', '.L', '.SW', '.AS']:
@@ -61,10 +52,10 @@ def strip_exchange_suffix(ticker):
             return ticker[:-len(suffix)]
     return ticker
 
-# Load holdings country structure
+
 hold_country = pd.read_csv("webscrap_and_data/master_location_table.csv")
 
-# Filter out EU and empty locations
+
 hold_country = hold_country[~hold_country["Location"].isin(["Europäische Union", "--"])]
 
 countries = hold_country["Location"].unique().tolist()
@@ -85,7 +76,7 @@ for i, etf in enumerate(etfs):
         weight_c = df[df["Location"] == country]["Weight"].sum()
         A[j, i] = weight_c
 
-# load holdings industry structure
+
 hold_industry = pd.read_csv("webscrap_and_data/master_industry_table.csv")
 
 industries = hold_industry["Sector"].unique().tolist()
@@ -129,15 +120,15 @@ delta = 0.1   # low TER penalty
 lam   = 0.05  # weak concentration penalty
 profile_name = "High-risk profile selected"
 
-max_etfs = 10  # maximum number of ETFs in portfolio
+max_etfs = 10  
 
 
-# max exposure for country and industries + weight constraints
+
 E_min = np.zeros(C)
-E_max = np.ones(C) * 0.30 # max 30% exposure per country
+E_max = np.ones(C) * 0.30 
 I_min = np.zeros(I)
-I_max = np.ones(I) * 0.30 # max 30% exposure per industry
-w_max = np.ones(N) * 0.50 # max 50% weight per ETF
+I_max = np.ones(I) * 0.30 
+w_max = np.ones(N) * 0.50 
 
 # Build optimization model
 print("\nBuilding optimization model...")
@@ -162,15 +153,15 @@ m.setObjective(
 )
 
 # Add constraints
-# etf weight sum to 1 constraint
+
 m.addConstr(quicksum(w[i] for i in range(N)) == 1, "budget")
 
-# individual etf weight constraints
+
 for i in range(N):
     m.addConstr(w[i] >= 0.0, f"weight_min_{etfs[i]}")
     m.addConstr(w[i] <= w_max[i], f"weight_max_{etfs[i]}")
 
-#country exposure constraints
+
 for c in range(C):
     exposure = quicksum(A[c, i] * w[i] for i in range(N))
     m.addConstr(exposure >= E_min[c], f"country_min_{countries[c]}")
@@ -181,14 +172,13 @@ for c in range(C):
     #    m.addConstr(exposure <= 0.15, f"country_max_USA_15pct")
 
 
-# add industry exposure constraints 
+
 for ind in range(I):
     exposure = quicksum(B[ind, i] * w[i] for i in range(N))
     m.addConstr(exposure >= I_min[ind], f"industry_min_{industries[ind]}")
     m.addConstr(exposure <= I_max[ind], f"industry_max_{industries[ind]}")
 
-# add constraint that we want a max of max_etfs ETFs in the portfolio
-# This requires introducing binary variables and a big-M constraint
+
 y = m.addVars(N, vtype=GRB.BINARY, name="y")
 M = 1.0  # big-M value (should be >= max possible weight)
 for i in range(N):
@@ -242,138 +232,3 @@ if m.status == GRB.OPTIMAL:
     print(f"  Sharpe ratio:       {ret_val / np.sqrt(var_val):.4f}")
     print(f"  Weighted avg TER:   {ter_val:.4f} ({ter_val*100:.2f}%)")
     print(f"  Objective value:    {m.objVal:.6f}")
-
-'''
-    # add visualization of the portfolio weights
-    try:
-        import matplotlib
-        matplotlib.use('TkAgg')  # Use TkAgg backend for displaying plots
-        import matplotlib.pyplot as plt
-
-        labels = [etfs[i] for i in range(N) if w[i].X > 1e-6]
-        sizes = [w[i].X for i in range(N) if w[i].X > 1e-6]
-        
-        # Create explode effect for top holdings
-        explode = [0.05 if size == max(sizes) else 0 for size in sizes]
-        
-        # Use a nice color palette
-        colors = plt.cm.Dark2(range(len(sizes)))
-
-        plt.figure(figsize=(12, 8))
-        wedges, texts, autotexts = plt.pie(sizes, labels=labels, autopct='%1.1f%%', 
-                                            startangle=140, colors=colors, explode=explode,
-                                            textprops={'fontsize': 10, 'weight': 'bold'})
-        
-        # Make percentage text more readable
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontsize(11)
-        
-        plt.axis('equal')
-        plt.title('ETF Portfolio Weights', fontsize=16, weight='bold', pad=20)
-        plt.tight_layout()
-        plt.show(block=True)
-    except ImportError:
-        print("matplotlib not installed, skipping portfolio weights visualization.")
-    # add visualization of country exposures
-    try:
-        import matplotlib
-        matplotlib.use('TkAgg')
-        import matplotlib.pyplot as plt
-
-        # Compute exact country exposures (same as printed)
-        country_exposures = [(countries[c], sum(A[c, i] * w[i].X for i in range(N))) for c in range(C)]
-        
-        # Separate large and small exposures
-        threshold = 0.01
-        large_exposures = [(label, size) for label, size in country_exposures if size > threshold]
-        small_exposures = [(label, size) for label, size in country_exposures if size <= threshold]
-        
-        # Add Rest category if there are small exposures
-        if small_exposures:
-            rest_sum = sum(size for _, size in small_exposures)
-            large_exposures.append(('Rest', rest_sum))
-        
-        if large_exposures:
-            country_labels_filtered, country_sizes_filtered = zip(*large_exposures)
-        else:
-            country_labels_filtered, country_sizes_filtered = ['No Data'], [1.0]
-        
-        # Create explode effect for top exposures
-        explode = [0.05 if size == max(country_sizes_filtered) else 0 for size in country_sizes_filtered]
-        
-        # Use a nice color palette
-        colors = plt.cm.Dark2(range(len(country_sizes_filtered)))
-
-        plt.figure(figsize=(12, 8))
-        wedges, texts, autotexts = plt.pie(country_sizes_filtered, labels=country_labels_filtered, 
-                                            autopct='%1.1f%%', startangle=140, colors=colors,
-                                            explode=explode, 
-                                            textprops={'fontsize': 10, 'weight': 'bold'})
-        
-        # Make percentage text more readable
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontsize(11)
-        
-        plt.axis('equal')
-        plt.title('Country Exposures in ETF Portfolio', fontsize=16, weight='bold', pad=20)
-        plt.tight_layout()
-        plt.show(block=True)
-    except ImportError:
-        print("matplotlib not installed, skipping country exposures visualization.")
-    # add visualization of industry exposures
-    try:
-        import matplotlib
-        matplotlib.use('TkAgg')
-        import matplotlib.pyplot as plt
-
-        # Compute exact industry exposures (same as printed)
-        industry_exposures = [(industries[ind], sum(B[ind, i] * w[i].X for i in range(N))) for ind in range(I)]
-        
-        # Separate large and small exposures
-        threshold = 0.01
-        large_exposures = [(label, size) for label, size in industry_exposures if size > threshold]
-        small_exposures = [(label, size) for label, size in industry_exposures if size <= threshold]
-        
-        # Add Rest category if there are small exposures
-        if small_exposures:
-            rest_sum = sum(size for _, size in small_exposures)
-            large_exposures.append(('Rest', rest_sum))
-        
-        if large_exposures:
-            industry_labels_filtered, industry_sizes_filtered = zip(*large_exposures)
-        else:
-            industry_labels_filtered, industry_sizes_filtered = ['No Data'], [1.0]
-        
-        # Create explode effect for top exposures
-        explode = [0.05 if size == max(industry_sizes_filtered) else 0 for size in industry_sizes_filtered]
-        
-        # Use a nice color palette
-        colors = plt.cm.Dark2(range(len(industry_sizes_filtered)))
-
-        plt.figure(figsize=(12, 8))
-        wedges, texts, autotexts = plt.pie(industry_sizes_filtered, labels=industry_labels_filtered, 
-                                            autopct='%1.1f%%', startangle=140, colors=colors,
-                                            explode=explode, 
-                                            textprops={'fontsize': 10, 'weight': 'bold'})
-        
-        # Make percentage text more readable
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontsize(11)
-        
-        plt.axis('equal')
-        plt.title('Industry Exposures in ETF Portfolio', fontsize=16, weight='bold', pad=20)
-        plt.tight_layout()
-        plt.show(block=True)
-    except ImportError:
-        print("matplotlib not installed, skipping industry exposures visualization.")
-
-    # print plots
-
-
-    
-else:
-    print(f"\nOptimization failed with status: {m.status}")
-'''
